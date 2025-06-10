@@ -6,28 +6,35 @@ from colorama import Fore
 from dotenv import load_dotenv
 from openai import OpenAI
 
-import prompts
 from agentic_patterns.utils import create_completion, create_prompt_struct
 from agentic_patterns.history import ChatHistory
+from .prompts import BASE_GENERATION_SYSTEM_PROMPT, BASE_REFLECTION_SYSTEM_PROMPT
 
 logger = structlog.stdlib.get_logger(__name__)
 load_dotenv()
 
-LOGS_DIR = Path("./logs")
+LOGS_DIR = Path(__file__).parent / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
+class CompletionColor(Enum):
+    DEFAULT = Fore.WHITE
+    REFLECTION = Fore.BLUE
+    GENERATION = Fore.GREEN
 
 class ReflectionAgent:
-    class CompletionColor(Enum):
-        DEFAULT = Fore.WHITE
-        REFLECTION = Fore.BLUE
-        GENERATION = Fore.GREEN
-
-    def __init__(self, model='gpt-4o-mini', save_logs=False):
-        self.client = OpenAI()
+    def __init__(self, model='gpt-4o-mini', run_local: bool=False, save_logs: str=False):
         self.model = model
         self.save_logs = save_logs
         self.logs = []
+        self.client = self._initialize_client(run_local)
+
+    def _initialize_client(self, run_local: bool):
+        if run_local:
+            return OpenAI(
+                base_url='http://localhost:11434/v1',
+                api_key='ollama',
+            )
+        return OpenAI()
 
     def _generate_completion(self, history: list, completion_color: CompletionColor = CompletionColor.DEFAULT) -> str:
         response = create_completion(self.client, self.model, history)
@@ -37,15 +44,24 @@ class ReflectionAgent:
             print(completion_color.value, f'\n\n{completion_color.name}\n\n', response)
         return response
 
+    def _save_logs(self):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{self.model}_{timestamp}.log"
+        log_path = LOGS_DIR / filename
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.write("".join(self.logs))
+
+        logger.info("Logs saved:", path=str(log_path))
+
     def generate(self, generation_history: list) -> str:
-        return self._generate_completion(generation_history, completion_color=self.CompletionColor.GENERATION)
+        return self._generate_completion(generation_history, completion_color=CompletionColor.GENERATION)
 
     def reflect(self, reflection_history: list) -> str:
-        return self._generate_completion(reflection_history, completion_color=self.CompletionColor.REFLECTION)
+        return self._generate_completion(reflection_history, completion_color=CompletionColor.REFLECTION)
 
     def run(self, user_message: str, steps: int = 5, generation_prompt: str = '', reflection_prompt: str = '') -> str:
-        generation_prompt = f'{generation_prompt}\n{prompts.BASE_GENERATION_SYSTEM_PROMPT}'
-        reflection_prompt = f'{reflection_prompt}\n{prompts.BASE_REFLECTION_SYSTEM_PROMPT}'
+        generation_prompt = f'{generation_prompt}\n{BASE_GENERATION_SYSTEM_PROMPT}'
+        reflection_prompt = f'{reflection_prompt}\n{BASE_REFLECTION_SYSTEM_PROMPT}'
 
         generation_history = ChatHistory(
             messages=[
@@ -81,13 +97,6 @@ class ReflectionAgent:
             reflection_history.append(create_prompt_struct(content=reflection, role='assistant'))
 
         if self.save_logs:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"rollout_{timestamp}.log"
-            log_path = LOGS_DIR / filename
-            with open(log_path, 'w', encoding='utf-8') as f:
-                f.write("".join(self.logs))
-
-            logger.info("rollout_log_saved", path=str(log_path))
-            return log_path
+            self._save_logs()
 
         return completion

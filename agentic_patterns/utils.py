@@ -5,7 +5,7 @@ from tenacity import (
 )
 
 
-@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+# @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
 def create_completion(client: str, model: str, messages: str):
     response = client.chat.completions.create(model=model, messages=messages)
     return response.choices[0].message.content.strip()
